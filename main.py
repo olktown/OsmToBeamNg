@@ -12,7 +12,5 @@ if __name__ == '__main__':
     areaNodes = api.load_streets_in_area_to_nodes('Sankt Englmar')
     #areaNodesCategory = api.load_streets_in_area_to_categorized_nodes('Sankt Englmar')
     #streetNameNodes = api.load_streets_by_name({'Sankt Englmar': ['Galgenberg', 'Bayerweg'], 'Straubing': ['Dornierstraße']})
-    #streetNameNodesWithCategory = api.load_streets_by_name_categorized(
-    #    {'Sankt Englmar': ['Galgenberg', 'Bayerweg'], 'Straubing': ['Dornierstraße']})
+    #streetNameNodesWithCategory = api.load_streets_by_name_categorized({'Sankt Englmar': ['Galgenberg', 'Bayerweg'], 'Straubing': ['Dornierstraße']})
     BeamPyApiController.createScenario(areaNodes, "smallgrid")
-    print("done")

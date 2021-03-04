@@ -1,8 +1,17 @@
 from OSMPythonTools.overpass import Overpass
-from GpsPoint import GpsPoint
 import math
 
 
+# PARAMETERS:
+#   root: gps point
+#   node: gps point
+#
+# DESCRIPTION:
+#   this function calculates a gps point to a point
+#   in a coordination system with the root node as virtual zero
+#
+# RETURN:
+#   [x, y]
 def _calculate_coordinates_to_meter(root, node):  #https://www.kompf.de/gps/distcalc.html
     if type(node[0]) is list:
         print(node)
@@ -20,69 +29,163 @@ class OsmApiController:
     def __init__(self):
         self._overpass = Overpass()
 
-    def _generate_query_for_streets(self, area, max_speed):
-        query = 'area[name="' + area + '"];('
-        for type in self._possible_street_types:
-            query += 'way[highway=' + type + ']'
-            if type != 'motorway':
-                query += '[maxspeed=' + str(max_speed) + '](area);'
-            else:
-                query += '(area);'
-        query += ');out geom;'
-        return query
-
-    def load_streets_in_place_with_max_speed(self, place, max_speed):
-        query = 'area[name="' + place + '"]; way[maxspeed="' + str(max_speed) + '"](area);out geom;'
-        result = self._overpass.query(query)
-        self._streets = result.elements()
-
-    def load_streets_in_place_with_name(self, place, name):
-        query = 'area[name="' + place + '"]; way[name="' + name + '"](area);out geom;'
-        result = self._overpass.query(query)
-        self._streets = result.elements()
-
-    def load_streets_by_name(self, street_name_dict):
+    # ------------------------------- public methods ------------------------------- #
+    # PARAMETERS:
+    #   street_name_dict: dictionary
+    #       key: city name
+    #       value: list of street names in this city
+    #   timeout: int
+    #       timeout for the osm api
+    #
+    # DESCRIPTION:
+    #   this method returns a list of lists for each street with points
+    #   normalized into a coordination system with one of the points as
+    #   virtual zero
+    #
+    # RETURN:
+    #   list[list[list]]>
+    def load_streets_by_name(self, street_name_dict, timeout=50):
         self._root = None
         nodes = []
         for area in street_name_dict:
             streets = street_name_dict[area]
             for street in streets:
-                self.load_streets_in_place_with_name(area, street)
+                self._load_streets_in_area_with_name(area, street, timeout)
                 if self._root is None:
                     self._root = self._streets[0].geometry()['coordinates'][0]
-                nodes.append(self.get_normalized_coordinates())
+                nodes.append(self._get_normalized_coordinates())
         return nodes
 
-    def load_streets_by_name_categorized(self, street_name_dict):
+    # PARAMETERS:
+    #   street_name_dict: dictionary
+    #       key: city name
+    #       value: list of street names in this city
+    #   timeout: int
+    #       timeout for the osm api
+    #
+    # DESCRIPTION:
+    #   this method returns a dictionary with the type of a street as key and a list of streets
+    #   as value
+    #   key: type of street
+    #   value: list of streets of this type, this lists contain lists with the coordination points
+    #
+    # RETURN:
+    #   dictionary<string, list[list[list]]>
+    def load_streets_by_name_categorized(self, street_name_dict, timeout=50):
         self._root = None
         nodes = []
         for area in street_name_dict:
             streets = street_name_dict[area]
             for street in streets:
-                self.load_streets_in_place_with_name(area, street)
+                self._load_streets_in_area_with_name(area, street, timeout)
                 if self._root is None:
                     self._root = self._streets[0].geometry()['coordinates'][0]
-                nodes.append(self.get_normalized_coordinates_with_category())
+                nodes.append(self._get_normalized_coordinates_with_category())
         return nodes
 
-    def _load_streets_in_area(self, areaName):
-        query = 'area[name="' + areaName + '"]; way(area); out geom;'
-        return self._overpass.query(query, timeout=150).elements()
-
-    def load_streets_in_area_to_nodes(self, areaName):
+    # PARAMETERS:
+    #   area_name: string
+    #       name of a city, where you want to download the street points
+    #   timeout: int
+    #       timeout for the osm api
+    #
+    # DESCRIPTION:
+    #   this method returns a list of lists for each street with points
+    #   normalized into a coordination system with one of the points as
+    #   virtual zero
+    #
+    # RETURN:
+    #   list[list[list]]>
+    def load_streets_in_area_to_nodes(self, area_name, timeout=50):
         self._root = None
-        a = self._load_streets_in_area(areaName)
-        self._streets = self._load_streets_in_area(areaName)
+        a = self._load_streets_in_area(area_name)
+        self._streets = self._load_streets_in_area(area_name, timeout)
         self._root = self._streets[0].geometry()['coordinates'][0]
-        return self.get_normalized_coordinates()
+        return self._get_normalized_coordinates()
 
-    def load_streets_in_area_to_categorized_nodes(self, areaName):
+    # PARAMETERS:
+    #   area_name: string
+    #       name of a city, where you want to download the street points
+    #   timeout: int
+    #       timeout for the osm api
+    #
+    # DESCRIPTION:
+    #   this method returns a dictionary with the type of a street as key and a list of streets
+    #   as value
+    #   key: type of street
+    #   value: list of streets of this type, this lists contain lists with the coordination points
+    #
+    # RETURN:
+    #   dictionary<string, list[list[list]]>
+    def load_streets_in_area_to_categorized_nodes(self, area_name, timeout=50):
         self._root = None
-        self._streets = self._load_streets_in_area(areaName)
+        self._streets = self._load_streets_in_area(area_name, timeout)
         self._root = self._streets[0].geometry()['coordinates'][0]
-        return self.get_normalized_coordinates_with_category()
+        return self._get_normalized_coordinates_with_category()
 
-    def get_normalized_coordinates_with_category(self):
+    # ------------------------------- private methods ------------------------------- #
+
+    # PARAMETERS:
+    #   area_name: string
+    #       name of a city, where you want to download the street points
+    #   street_name: string
+    #       name of a street in the given city
+    #   timeout: int
+    #       timeout for the osm api
+    #
+    # DESCRIPTION:
+    #   this method returns the elements of the result of the osm query
+    #
+    # RETURN:
+    #   object, osm result elements
+    def _load_streets_in_area_with_name(self, area_name, street_name, timeout=50):
+        query = 'area[name="' + area_name + '"]; way[name="' + street_name + '"](area);out geom;'
+        self._streets = self._overpass.query(query, timeout).elements()
+
+    # PARAMETERS:
+    #   area_name: string
+    #       name of a city, where you want to download the street points
+    #   timeout: int
+    #       timeout for the osm api
+    #
+    # DESCRIPTION:
+    #   this method returns the elements of the result of the osm query
+    #
+    # RETURN:
+    #   object, osm result elements
+    def _load_streets_in_area(self, area_name, timeout=50):
+        query = 'area[name="' + area_name + '"]; way(area); out geom;'
+        return self._overpass.query(query, timeout).elements()
+
+    # DESCRIPTION:
+    #   this method takes every single gps point of the loaded streets in self._streets and
+    #   transforms it into a virtual coordination system with the self._root as virtual zero
+    #
+    # RETURN:
+    #   list[list[list]]>
+    def _get_normalized_coordinates(self):
+        nodes = []
+        for street in self._streets:
+            new_nodes = []
+            for node in street.geometry()['coordinates']:
+                if type(node[0]) is float:
+                    new_node = _calculate_coordinates_to_meter(self._root, node)
+                    new_nodes.append((new_node[0], new_node[1], 0))
+                if type(node[0]) is list:
+                    for n in node:
+                        new_node = _calculate_coordinates_to_meter(self._root, n)
+                        new_nodes.append((new_node[0], new_node[1], 0))
+            nodes.append(new_nodes)
+        return nodes
+
+    # DESCRIPTION:
+    #   this method takes every single gps point of the loaded streets in self._streets and
+    #   transforms it into a virtual coordination system with the self._root as virtual zero
+    #   the streets are categorized by its types
+    #
+    # RETURN:
+    #   dictionary<string, list[list[list]]>
+    def _get_normalized_coordinates_with_category(self):
         nodes = {}
         for street in self._streets:
             new_nodes = []
@@ -106,71 +209,6 @@ class OsmApiController:
                         new_nodes.append((new_node[0], new_node[1], 0))
             nodes[street_type].append(new_nodes)
         return nodes
-
-    def get_normalized_coordinates(self):
-        nodes = []
-        for street in self._streets:
-            new_nodes = []
-            for node in street.geometry()['coordinates']:
-                if type(node[0]) is float:
-                    new_node = _calculate_coordinates_to_meter(self._root, node)
-                    new_nodes.append((new_node[0], new_node[1], 0))
-                if type(node[0]) is list:
-                    for n in node:
-                        new_node = _calculate_coordinates_to_meter(self._root, n)
-                        new_nodes.append((new_node[0], new_node[1], 0))
-            nodes.append(new_nodes)
-        return nodes
-
-    def getStreetGpsPoints(self):
-        gpsPoints = []
-        for street in self._streets:
-            for point in street.geometry()['coordinates']:
-                newPoint = GpsPoint(point[1], point[0])
-                gpsPoints.append(newPoint)
-        return gpsPoints
-
-    def generatePointsBetween(self, start, end):
-        bearing = start.bearing_between_point(end)
-        distance = int(start.distance_to_point(end))
-        points = []
-        for i in range(distance):
-            points.append(start.point_with_distance(i, bearing))
-        return points
-
-    def generateLineForStreetGpsPoints(self):
-        gpsPoints = []
-        for street in self._streets:
-            i = 0
-            coordinates = street.geometry()['coordinates']
-            while i < len(coordinates)-1:
-                point_start = GpsPoint(coordinates[i][1], coordinates[i][0])
-                point_end = GpsPoint(coordinates[i + 1][1], coordinates[i + 1][0])
-                points = self.generatePointsBetween(point_start, point_end)
-                gpsPoints.append(point_start)
-                gpsPoints.extend(points)
-                gpsPoints.append(point_end)
-                i += 1
-        return gpsPoints
-
-    def getBoundingRectOfStreets(self):
-        minLat = None
-        minLong = None
-        maxLat = None
-        maxLong = None
-
-        for street in self._streets:
-            bounds = street._json['bounds']
-            if minLat is None or minLat > bounds['minlat']:
-                minLat = bounds['minlat']
-            if minLong is None or minLong > bounds['minlon']:
-                minLong = bounds['minlon']
-            if maxLat is None or maxLat < bounds['maxlat']:
-                maxLat = bounds['maxlat']
-            if maxLong is None or maxLong < bounds['maxlon']:
-                maxLong = bounds['maxlon']
-
-        return {'min' : GpsPoint(minLat, minLong), 'max': GpsPoint(maxLat, maxLong)}
 
 
 
