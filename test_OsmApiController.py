@@ -63,3 +63,13 @@ def test_load_streets_in_area_to_categorized_nodes():
     assert 'platform' in nodes
     assert 'cycleway' in nodes
 
+
+def test_load_route_betwee_streets():
+    api = OsmApiController()
+    nodes = api.load_route_between_streets([["Straubing", "Dornierstraße"], ["Straubing", "Sachsenring"], ["Straubing", "Heerstraße"]])
+    assert len(nodes) == 221
+    assert round(nodes[0][0], 2) == -3855.92
+    assert round(nodes[0][1], 2) == -1349.85
+    assert round(nodes[220][0], 2) == -41.0
+    assert round(nodes[220][1], 2) == -51.53
+

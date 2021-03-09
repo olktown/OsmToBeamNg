@@ -1,5 +1,7 @@
 from OSMPythonTools.overpass import Overpass
 import math
+import requests
+import json
 
 
 # PARAMETERS:
@@ -13,8 +15,6 @@ import math
 # RETURN:
 #   [x, y]
 def _calculate_coordinates_to_meter(root, node):  #https://www.kompf.de/gps/distcalc.html
-    if type(node[0]) is list:
-        print(node)
     lat = (root[1] + node[1]) / 2 * 0.01745
     dx = 111.3 * math.cos(lat) * (root[0] - node[0])
     dy = 111.3 * (root[1] - node[1])
@@ -30,6 +30,59 @@ class OsmApiController:
         self._overpass = Overpass()
 
     # ------------------------------- public methods ------------------------------- #
+    # PARAMETERS:
+    #   gps_waypoints: list[list]
+    #       list with lists in it - > [[long, lat], [long, lat]]
+    #
+    # DESCRIPTION:
+    #   this method returns a list of lists for each point on the calculated road
+    #
+    # RETURN:
+    #   list[list] -> [[x, y],[x,y]]
+    def load_route_between_gps_points(self, gps_waypoints):
+        body = {"coordinates": gps_waypoints}
+        headers = {
+            'Accept': 'application/json, application/geo+json, application/gpx+xml, img/png; charset=utf-8',
+            'Authorization': '5b3ce3597851110001cf62481aec4e27fb894c80a3c6fa9dc17d7570',
+            'Content-Type': 'application/json; charset=utf-8'
+        }
+        call = requests.post('https://api.openrouteservice.org/v2/directions/driving-car/geojson', json=body,
+                             headers=headers)
+
+        if call.status_code != 200:
+            print("ERROR: " + call.reason)
+            raise IOError
+
+        j = json.loads(call.text)
+        return self._get_normalized_coordinates_from_gps_points(
+            root=[j['bbox'][0], j['bbox'][1]],
+            gps_points=j['features'][0]['geometry']['coordinates']
+        )
+
+    # PARAMETERS:
+    #   waypoints: list[list]
+    #       list with lists in it - > [["city", "street"], ["city", "street"]]
+    #
+    #   timeout: int
+    #       timeout for the osm api
+    #
+    # DESCRIPTION:
+    #   this method returns a list of lists for each point on the calculated road
+    #
+    # RETURN:
+    #   list[list] -> [[x, y],[x,y]]
+    def load_route_between_streets(self, waypoints, timeout=50):
+        self._root = None
+        gps_waypoints = []
+
+        for waypoint in waypoints:
+            area = waypoint[0]
+            street = waypoint[1]
+            res = self._load_streets_in_area_with_name(area, street, timeout)
+            gps_waypoints.append(res[0].geometry()['coordinates'][0])
+
+        return self.load_route_between_gps_points(gps_waypoints)
+
     # PARAMETERS:
     #   street_name_dict: dictionary
     #       key: city name
@@ -50,7 +103,7 @@ class OsmApiController:
         for area in street_name_dict:
             streets = street_name_dict[area]
             for street in streets:
-                self._load_streets_in_area_with_name(area, street, timeout)
+                self._streets = self._load_streets_in_area_with_name(area, street, timeout)
                 if self._root is None:
                     self._root = self._streets[0].geometry()['coordinates'][0]
                 nodes.append(self._get_normalized_coordinates())
@@ -77,7 +130,7 @@ class OsmApiController:
         for area in street_name_dict:
             streets = street_name_dict[area]
             for street in streets:
-                self._load_streets_in_area_with_name(area, street, timeout)
+                self._streets = self._load_streets_in_area_with_name(area, street, timeout)
                 if self._root is None:
                     self._root = self._streets[0].geometry()['coordinates'][0]
                 nodes.append(self._get_normalized_coordinates_with_category())
@@ -140,7 +193,7 @@ class OsmApiController:
     #   object, osm result elements
     def _load_streets_in_area_with_name(self, area_name, street_name, timeout=50):
         query = 'area[name="' + area_name + '"]; way[name="' + street_name + '"](area);out geom;'
-        self._streets = self._overpass.query(query, timeout).elements()
+        return self._overpass.query(query, timeout).elements()
 
     # PARAMETERS:
     #   area_name: string
@@ -156,6 +209,19 @@ class OsmApiController:
     def _load_streets_in_area(self, area_name, timeout=50):
         query = 'area[name="' + area_name + '"]; way(area); out geom;'
         return self._overpass.query(query, timeout).elements()
+
+    # DESCRIPTION:
+    #   this method takes every single gps point of the loaded streets in self._streets and
+    #   transforms it into a virtual coordination system with the self._root as virtual zero
+    #
+    # RETURN:
+    #   list[list[list]]>
+    def _get_normalized_coordinates_from_gps_points(self, root, gps_points):
+        nodes = []
+        for point in gps_points:
+            new_node = _calculate_coordinates_to_meter(root, point)
+            nodes.append(new_node)
+        return nodes
 
     # DESCRIPTION:
     #   this method takes every single gps point of the loaded streets in self._streets and
